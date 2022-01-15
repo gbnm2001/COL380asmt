@@ -6,7 +6,6 @@ Data classify(Data &D, const Ranges &R, unsigned int numt)
    assert(numt < MAXTHREADS);
    int RNUM = R.num();
    Counter counts[RNUM]; // I need on counter per interval. Each counter can keep pre-thread subcount.
-   
    #pragma omp parallel num_threads(numt)
    {
       int tid = omp_get_thread_num(); // I am thread number tid
@@ -20,16 +19,12 @@ Data classify(Data &D, const Ranges &R, unsigned int numt)
    // Accumulate all sub-counts (in each interval;'s counter) into rangecount
    unsigned int *rangecount = new unsigned int[RNUM];
    int rcount[RNUM];
-   #pragma omp parallel num_threads(numt)
-   {
-      int tid = omp_get_thread_num();
-      for(int r=tid; r<RNUM; r+=numt) { // For all intervals
-         rangecount[r] = 0;
-         rcount[r] = 0;
-         for(int t=0; t<numt; t++) // For all threads
-            rangecount[r] += counts[r].get(t);
-         // std::cout << rangecount[r] << " elements in Range " << r << "\n"; // Debugging statement
-      }
+   for(int r=0; r<RNUM; r++) { // For all intervals
+      rangecount[r] = 0;
+      rcount[r] = 0;
+      for(int t=0; t<numt; t++) // For all threads
+         rangecount[r] += counts[r].get(t);
+      // std::cout << rangecount[r] << " elements in Range " << r << "\n"; // Debugging statement
    }
 
    // Compute prefx sum on rangecount.
@@ -40,29 +35,12 @@ Data classify(Data &D, const Ranges &R, unsigned int numt)
    // Now rangecount[i] has the number of elements in intervals before the ith interval.
 
    Data D2 = Data(D.ndata); // Make a copy
-
-   int end[numt];
-   int start[numt];
-   end[numt-1] = D.ndata;
-   start[0] = 0;
-   for (int i=0;i<numt; i++){
-      if(i != numt)
-         end[i] = (i+1)*(D.ndata/numt);
-      
-      if(i!=0)
-         start[i] = end[i-1];
-   }
-
-   #pragma omp parallel num_threads(numt)
-   {
-      int tid = omp_get_thread_num();
-      //for(int r=tid; r<RNUM; r+=numt) { // Thread together share-loop through the intervals 
-      //   int rcount = 0;
-         for(int d = start[tid]; d< end[tid]; d++){ // For each interval, thread loops through all of data and  
-            int r = D.data[d].value; // If the data item is in this interval 
-            D2.data[rangecount[r-1] + rcount[r]++] = D.data[d]; // Copy it to the appropriate place in D2.
-         }
-      //}
+   
+   
+   for(int d=0; d<D.ndata; d++){ // For each interval, thread loops through all of data and  
+             //if(D.data[d].value == r) // If the data item is in this interval 
+      int r = D.data[d].value;
+      D2.data[rangecount[r-1]+rcount[r]++] = D.data[d]; // Copy it to the appropriate place in D2.
    }
 
    return D2;
