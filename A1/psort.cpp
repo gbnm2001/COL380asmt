@@ -1,5 +1,7 @@
 #include "psort.h"
 #include <omp.h>
+#include <stdio.h>
+#include <iostream>
 
 struct node {
     uint32_t val;
@@ -79,8 +81,8 @@ void ParallelSort(uint32_t *data, uint32_t n, int p)
         return;
     }
 
-    int step = n/p;
-    int ones = n%p;
+    uint32_t step = n/p;
+    uint32_t ones = n%p;
     uint32_t starts[p];
     uint32_t i=0, j=0;
     do{
@@ -95,22 +97,21 @@ void ParallelSort(uint32_t *data, uint32_t n, int p)
     while(i<n);
 
     uint32_t R[p*p]; //pseudo splitters
-    int start, end;
+    uint32_t start, end;
     i=0;
-    for (int k=0; k<p; k++){
+    for (uint32_t k=0; k<p; k++){
         start = starts[k];
         end = starts[k] +p;
-        for (int j=start; j<end; j++){
+        for (uint32_t j=start; j<end; j++){
             R[i] = data[j];
             i++;
         }
     }
     
     quickSort(R, 0, p*p -1);
-
     uint32_t S[p-1]; // splitters
 
-    for (int j=0; j<p-1; j++){
+    for (uint32_t j=0; j<p-1; j++){
         S[j] = R[ (j+1)*p ];
     }
 
@@ -119,8 +120,33 @@ void ParallelSort(uint32_t *data, uint32_t n, int p)
         split[i] = new ll();
     }
 
-    bool put = false;
-    for (int k=0; k<n; k++){
+    for (uint32_t j=0;j<p;j++){
+        #pragma omp task
+        {
+            if(j == 0){
+                for (uint32_t k=0; k<n; k++){
+                    if(data[k] <= S[0]){
+                        split[0]->insert(data[k]);
+                    }
+                }
+            }else if(0<j && j<p-1){
+                for (uint32_t k=0; k<n; k++){
+                    if( (S[j-1] < data[k]) && (data[k] <= S[j]) ){
+                        split[j]->insert(data[k]);
+                    }
+                }
+            }
+            else if(j == (p-1)){
+                for (uint32_t k=0; k<n; k++){
+                    if( data[k] > S[p-2]){
+                        split[p-1]->insert(data[k]);
+                    }
+                }
+            }
+        }
+    }
+    /*bool put = false;
+    for (uint32_t k=0; k<n; k++){//splitting without tasks
         put = false;
         
         for (int j=0;j<p-1;j++){//can insert by binary search
@@ -134,40 +160,42 @@ void ParallelSort(uint32_t *data, uint32_t n, int p)
         if(!put){
             split[p-1]->insert(data[k]);
         }
+    }*/
+    #pragma omp taskwait
+    //copy to the data
+    uint32_t splitIndex[p+1];
+    splitIndex[0] = 0;
+    for (uint32_t i=0; i<p; i++){
+        splitIndex[i+1] = splitIndex[i] + split[i]->size;
     }
 
 
-    //copy to the data
-    i=0;
-    while (i<n){
-        for(int k=0; k<p; k++){
+    
+    for(uint32_t k=0; k<p; k++){
+        #pragma omp task
+        {
+            uint32_t loc = splitIndex[k];
             node * temp = split[k]->head;
             while(temp){
-                data[i] = temp->val;
-                i++;
+                data[loc] = temp->val;
+                loc++;
                 temp = temp->next;
             }
         }
     }
 
+    #pragma omp taskwait
 
-    int splitIndex[p+1];
-    splitIndex[0] = 0;
-    for (int i=0; i<p; i++){
-        splitIndex[i+1] = splitIndex[i] + split[i]->size;
-    }
-
-    //#pragma omp barrier
-    for(int k=0; k<p; k++){
+    for(uint32_t k=0; k<p; k++){
         if(split[k]->size < 2*n/p){
-            //#pragma omp task shared
+            #pragma omp task
             quickSort(data, splitIndex[k], splitIndex[k+1]-1);
         }
         else{
-            int N = split[k]->size;
+            uint32_t N = split[k]->size;
             
             uint32_t * childData = &data[ splitIndex[k] ];
-            //#pragma omp task
+            #pragma omp task
             ParallelSort(childData, N, p);
         }
     }
