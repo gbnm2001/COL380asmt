@@ -3,16 +3,19 @@
 #include <assert.h>
 #include "randomizer.hpp"
 #include <vector>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <stdint.h>
 #include <algorithm>
 #include <utility>
 #include <unordered_map>
-using namespace std;
+#include <stdio.h>
 
-
-bool comp(pair<uint32_t, uint32_t> a, pair<uint32_t, uint32_t> b){
+bool comp(std::pair<uint32_t, uint32_t> a, std::pair<uint32_t, uint32_t> b){
+    if(a.second==b.second){
+        return a.first<b.first;
+    }
     return a.second > b.second;
 }
 
@@ -29,12 +32,12 @@ int main(int argc, char* argv[]){
     int limit = 10;
     std::fstream fs(graph_file, std::ios::in | std::ios::binary);
 
-    std::cout<<"ARRAY INITIALISED\n";
+    auto begin = std::chrono::high_resolution_clock::now();
     //Only one randomizer object should be used per MPI rank, and all should have same seed
     Randomizer random_generator(seed, num_nodes, restart_prob);
     int rank, size;
     uint32_t from, to, i;
-    vector<uint32_t> adjacents[num_nodes];
+    std::vector<uint32_t> adjacents[num_nodes];
     for (i=0; i<num_edges; i++){
         for(int i=0;i<4;i++){
             fs.read((char*)&from+3-i, 1);
@@ -47,13 +50,24 @@ int main(int argc, char* argv[]){
     }
     std::cout<<"FILE READ ADJ LIST INITIALISED\n";
     int cur_node, edges;
-    vector<pair<uint32_t,uint32_t>> temp;
+    std::vector<std::pair<uint32_t,uint32_t>> temp;
     std::unordered_map<uint32_t, uint32_t> score;
-    std::ofstream wf("output.dat",std::ios::out | std::ios::binary);
     char * a;
     char null[8] = {'\0','\0','\0','\0','\0','\0','\0','\0'};
     
-    for (int node=0; node<50; node++){
+    MPI_Init(NULL, NULL);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    int start = (num_nodes/size)*rank;
+    int end = (num_nodes/size)*(rank+1);
+    if(rank == size-1){
+        end = num_nodes;
+    }
+    std::cout<<"rank = "<<rank<<"range = "<<start<<','<<end<<'\n';
+    FILE * fp;
+    fp = fopen("output.dat","w+");
+    fseek(fp, start*(1+num_rec*2)*4, SEEK_SET);
+    for (int node=start; node<end; node++){
         score.clear();
         for(int walk=0; walk<num_walks; walk++){
             cur_node = node;
@@ -80,7 +94,7 @@ int main(int argc, char* argv[]){
         temp.clear();
         std::unordered_map<uint32_t, uint32_t>::iterator iter;
         for (iter = score.begin(); iter!=score.end(); iter++){
-            pair<uint32_t, uint32_t> p;
+            std::pair<uint32_t, uint32_t> p;
             p.first = iter->first;
             p.second = iter->second;
             //cout<<p.first<<','<<p.second<<'\n';
@@ -89,40 +103,39 @@ int main(int argc, char* argv[]){
         sort(temp.begin(), temp.end(),comp);
         uint32_t outDegree = adjacents[node].size();
         a = (char *)&outDegree;
-        std::cout<<"\nnode "<< node << " outdegree = " << outDegree<<'\n';
+        //std::cout<<"\nnode "<< node << " outdegree = " << outDegree<<'\n';
+        //wf.fseek()
         for(int j=0; j<4;j++){
-            wf.write(a+3-j,1);
+            fwrite(a+3-j,1,1,fp);
         }
+        int temp_size=temp.size();
         for(int i=0; i<num_rec; i++){
-            if(i<temp.size()){
+            if(i<temp_size){
                 a  = (char *)&temp[i].first;
-                std::cout<<temp[i].first<<','<<temp[i].second<<'|';
+                //std::cout<<temp[i].first<<','<<temp[i].second<<'|';
                 for(int j=0;j<4;j++){
-                    wf.write(a+3-j, 1);
+                    fwrite(a+3-j,1,1,fp);
                 }
                 a = (char *)&temp[i].second;
                 for(int j=0;j<4;j++){
-                    wf.write(a+3-j,1);
+                    fwrite(a+3-j,1,1,fp);
                 }
             }else{
-                wf.write(null, 8);
+                fwrite(null,1, 8,fp);
             }
         }
     }
-    std::cout<<"CALCULATED\n";
     /*for(int i=0;i<num_nodes;i++){
         cout<<score[0][i]<<'\n';
     }*/
-    wf.close();
 
     std::cout<<"WRITE COMPLETE"<<'\n';
-    //Starting MPI pipeline
-    /*MPI_Init(NULL, NULL);
-    
+    auto endTime = std::chrono::high_resolution_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(endTime - begin);
+    double duration = (1e-9 * elapsed.count());
+    std::cout<<"rank "<<rank<<"time = "<<duration<<'\n';
     // Extracting Rank and Processor Count
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    print_random(rank, num_nodes, random_generator);
+    //print_random(rank, num_nodes, random_generator);
     
-    MPI_Finalize();*/
+    MPI_Finalize();
 }
